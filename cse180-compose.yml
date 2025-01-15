@@ -1,0 +1,19 @@
+name: 'cse_180_postgresql'
+
+services:
+  postgres:
+    container_name: container-psql
+    image: postgres:15.10
+    hostname: localhost
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: cse180
+      POSTGRES_PASSWORD: database4me
+      POSTGRES_DB: cse180
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
