@@ -29,10 +29,9 @@ static void good_exit(PGconn* conn)
 /* Exit with failure after closing connection to the server
  *  and freeing memory that was used by the PGconn object.
  */
-static void bad_exit(PGconn* conn, char *str)
+static void bad_exit(PGconn* conn, char *str1)
 {
-    fprintf(stderr, "%s: %s\n", 
-                str,PQerrorMessage(conn));
+    printf("%s: %s\n", str1);
     PQfinish(conn);
     exit(EXIT_FAILURE);
 }
@@ -63,15 +62,13 @@ int countStationTransfers(PGconn* conn, int theStationID)
 {
     //printf("We are in countStationTransfers for %d\n", theStationID);
 
-    //VARIABLES
-    PGresult *res;
-    int stationIDfound = -1;
-
     //begin transaction
     if (PQresultStatus(PQexec(conn, "BEGIN ISOLATION LEVEL SERIALIZABLE")) != PGRES_COMMAND_OK) {
         bad_exit(conn, "Begin Transaction Failed");
     }
 
+    //VARIABLES
+    PGresult *res;
     char tmp[12];
     const char *paramValues[1];
     sprintf(tmp, "%d", theStationID); //type cast int to str
@@ -81,12 +78,14 @@ int countStationTransfers(PGconn* conn, int theStationID)
     res = PQexecParams(conn, "SELECT stationID FROM Stations WHERE stationID =$1", 1, NULL, paramValues, NULL, NULL, 1);
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
         PQclear(res);
+        PQexec(conn, "ROLLBACK"); //Rollback transcation
         bad_exit(conn, "Stations Query Failed");
     } 
   
     if (PQntuples(res) < 1) {
         //printf("We are retuning -1\n");
         PQclear(res);
+        PQexec(conn, "END"); //if returning -1, end connection
         return -1;
     }
     PQclear(res);
@@ -94,6 +93,7 @@ int countStationTransfers(PGconn* conn, int theStationID)
     //go through Transfers and count the number of transfers with that StationID
     //use a cursor to the route1 of all transfers that match stationID
     if (PQresultStatus(PQexecParams(conn, "DECLARE c CURSOR FOR SELECT route1 FROM Transfers WHERE stationID =$1", 1, NULL, paramValues, NULL, NULL, 1)) != PGRES_COMMAND_OK) {
+        PQexec(conn, "ROLLBACK"); //Rollback transcation
         bad_exit(conn, "Transfers Cursor Query Failed");
     }
 
@@ -113,8 +113,8 @@ int countStationTransfers(PGconn* conn, int theStationID)
     res = PQexec(conn, "CLOSE CURSOR c");
     PQclear(res);
 
-    //End Transaction
-    res = PQexec(conn, "END");
+    //Commit Transaction
+    res = PQexec(conn, "COMMIT");
     PQclear(res);
     //printf("We are retuning count\n");
     return (count);
@@ -138,8 +138,74 @@ int countStationTransfers(PGconn* conn, int theStationID)
  */
 
 int changeRoute(PGconn *conn, char* theAgencyID, char* oldRouteID, char* newRouteID)
-{
+{   
+    //printf("We are in changeRoute\n");
 
+    if (PQresultStatus(PQexec(conn, "BEGIN ISOLATION LEVEL SERIALIZABLE")) != PGRES_COMMAND_OK) {
+        bad_exit(conn, "Begin Transaction Failed");
+    }
+    //VARIABLES
+    PGresult *res;
+
+    const char * paramValues[3];
+    paramValues[0] = theAgencyID; //$1
+    paramValues[1] = newRouteID;  //$2
+    paramValues[2] = oldRouteID;  //$3
+
+    //check if there is a row in Routes table with theAgencyID and newRouteID
+    res = PQexecParams(conn, "SELECT * FROM Routes WHERE agencyID =$1 AND routeID=$2", 2, NULL, paramValues, NULL, NULL, 0);
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        PQclear(res);
+        PQexec(conn, "ROLLBACK"); //Rollback transcation
+        printf("%s", PQerrorMessage(conn));
+        bad_exit(conn, "Routes Query Failed");
+    } 
+
+    //if not return -1
+    if (PQntuples(res) < 1) {
+        PQclear(res);
+        PQexec(conn, "COMMIT"); //if returning -1, end connection
+        return -1;
+    }
+    PQclear(res);
+
+
+    const char * paramValues1[2];
+    paramValues1[0] = theAgencyID; //$1
+    paramValues1[1] = oldRouteID;  //$2
+    //count how many rows in vehicles were changed and return this number
+    if (PQresultStatus(PQexecParams(conn, "DECLARE c CURSOR FOR SELECT vehicleMake FROM Vehicles WHERE agencyID =$1 AND routeID=$2", 2, NULL, paramValues1, NULL, NULL, 0)) != PGRES_COMMAND_OK) {
+        PQexec(conn, "ROLLBACK"); //Rollback transcation
+        bad_exit(conn, "Vehicles Cursor Query Failed");
+    }
+
+    //loop through the cursor to count how many there are in cursor!!!!!
+    // may need to change comparison to PGRES_TUPLES_OK
+
+    int count = 0;
+    while(1){
+        res = PQexec(conn, "FETCH NEXT FROM c");
+        if (PQntuples(res) == 0)
+            break;
+        count = count + 1;
+    }
+    PQclear(res);
+
+    //printf("Count is %d\n", count);
+
+    //go through Vehicles table and for any Vehicle with routeID = oldRouteID and agencyID = theAgencyID, update routeID to newRouteID
+    res = PQexecParams(conn, "UPDATE Vehicles SET routeID=$2 WHERE agencyID =$1 AND routeID=$3", 3, NULL, paramValues, NULL, NULL, 0);
+    if (PQresultStatus(res) != PGRES_COMMAND_OK) {
+        PQclear(res);
+        PQexec(conn, "ROLLBACK"); //Rollback transcation
+        bad_exit(conn, "Routes Query Failed");
+    } 
+    PQclear(res);
+
+    //Commit Transaction
+    PQexec(conn, "COMMIT");
+    
+    return (count);
 }
 
 /* Function: createNewServiceTickets:
@@ -201,9 +267,9 @@ int main(int argc, char** argv)
 
         int res = countStationTransfers(conn, stationIDs[i]);
         if (res == -1)
-            printf("There is no station whose stationID is %d", stationIDs[i]);
+            printf("There is no station whose stationID is %d\n", stationIDs[i]);
         else
-            printf("Number of transfers at %d is %d", stationIDs[i], res);
+            printf("Number of transfers at %d is %d\n", stationIDs[i], res);
     }
     
     /* Extra newline for readability */
@@ -213,6 +279,19 @@ int main(int argc, char** argv)
     /* Perform the calls to changeRoute  listed in Section 6 of Lab4,
      * and print messages as described.
      */
+    //int changeRoute(PGconn *conn, char* theAgencyID, char* oldRouteID, char* newRouteID)
+    char * Agencies[3] = {"SCMTD", "AMTK", "SFMTA"};
+    char * oldRoute[3] = {"16", "CC", "19"};
+    char * newRoute[3] = {"18", "SJS", "47"};
+    for(int i = 0; i < 3; i++){
+        //printf("We are calling changeRoute with Agency %s and newRoute %s\n", Agencies[i], newRoute[i]);
+        int res = changeRoute(conn, Agencies[i], oldRoute[i], newRoute[i]);
+        if (res == -1)
+            printf("%s does not operate a route with routeID %s\n", Agencies[i], newRoute[i]);
+        else
+            printf("%d vehicles were transferred to route %s by changeRoute\n", res, newRoute[i]);
+    }
+
     
     /* Extra newline for readability */
     printf("\n");
@@ -255,4 +334,6 @@ Unless the parameter is a binary(T/F) in which it must be specified as such.
 
 4) in pgSQL when you DECLARE a cursor, it is automatically open so you don't need 
 to open it again
+
+5) Commiting a transaction also ends it. It is good practice to commit even read only transactions. 
 */
