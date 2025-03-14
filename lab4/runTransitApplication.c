@@ -231,7 +231,43 @@ int changeRoute(PGconn *conn, char* theAgencyID, char* oldRouteID, char* newRout
 
 float createNewServiceTickets(PGconn* conn, char* theAgencyID, float maxTotalServiceCost)
 {
+    printf("We are in createNewServiceTickets for %s and %f\n", theAgencyID, maxTotalServiceCost);
+    if (PQresultStatus(PQexec(conn, "BEGIN ISOLATION LEVEL SERIALIZABLE")) != PGRES_COMMAND_OK) {
+        bad_exit(conn, "Begin Transaction Failed");
+    }
+    char * tmp;
+    sprintf(tmp, "%d", maxTotalServiceCost); //type cast int to str
+    const char * paramValues[2];
+    paramValues[0] = theAgencyID; //$1
+    paramValues[1] = tmp;  //$2
 
+    printf("We are about to call the stored function\n");
+
+    PGresult *res = PQexecParams(conn,
+        "SELECT createNewServiceTicketsFunction($1, $2);", // Function call
+        2,          
+        NULL,       
+        paramValues,
+        NULL,       
+        NULL,       
+        0           
+    );
+
+    printf("Return to createNewServiceTickets from stored function\n");
+
+    if (PQresultStatus(res) != PGRES_TUPLES_OK) {
+        PQexec(conn, "ROLLBACK"); //Rollback transcation
+        bad_exit(conn, "Stored Function Call Failed");
+    }
+
+    char *result = PQgetvalue(res, 0, 0); // Get result as a string
+    float ans = strtof(result, NULL);     // Convert string to float
+
+    PQclear(res);
+    PQexec(conn, "COMMIT");
+    
+    printf("Returning %d\n", ans);
+    return (ans);
 }
 
 int main(int argc, char** argv)
@@ -261,6 +297,7 @@ int main(int argc, char** argv)
      */
     //Required Tests
 
+    /*
     int stationIDs[4] = {1920, 9870, 6313, 1279};
     for(int i = 0; i < 4; i++){
         //printf("We are calling countStationTransfers with %d\n", stationIDs[i]);
@@ -272,13 +309,12 @@ int main(int argc, char** argv)
             printf("Number of transfers at %d is %d\n", stationIDs[i], res);
     }
     
-    /* Extra newline for readability */
+    // Extra newline for readability 
     printf("\n");
 
+    // Perform the calls to changeRoute  listed in Section 6 of Lab4,
+    // and print messages as described.
     
-    /* Perform the calls to changeRoute  listed in Section 6 of Lab4,
-     * and print messages as described.
-     */
     //int changeRoute(PGconn *conn, char* theAgencyID, char* oldRouteID, char* newRouteID)
     char * Agencies[3] = {"SCMTD", "AMTK", "SFMTA"};
     char * oldRoute[3] = {"16", "CC", "19"};
@@ -292,15 +328,34 @@ int main(int argc, char** argv)
             printf("%d vehicles were transferred to route %s by changeRoute\n", res, newRoute[i]);
     }
 
-    
-    /* Extra newline for readability */
+    //Extra newline for readability
     printf("\n");
-
     
-    /* Perform the calls to createNewServiceTickets  listed in Section 6 of Lab4,
-     * and print messages as described.
-     * You may use helper functions to do this, if you want.
-     */
+    // Perform the calls to createNewServiceTickets  listed in Section 6 of Lab4,
+    // and print messages as described.
+    // You may use helper functions to do this, if you want.
+
+    //float createNewServiceTickets(PGconn* conn, char* theAgencyID, float maxTotalServiceCost)
+    char * Agencies3[6] = {"JPBX", "TAPS", "SCAX", "SCMTD", "METX", "SFMTA"};
+    float maxTotalServiceCost[6] = {10000.00, 4000.00, 11000.00, 20000.00, 2500.00, 15000.00};
+    for(int i = 0; i < 6; i++){
+        //printf("We are calling createNewServiceTickets with Agency %s and maxTotalServiceCost %s\n", Agencies3[i], maxTotalServiceCost[i]);
+        float res = createNewServiceTickets(conn, Agencies3[i], maxTotalServiceCost[i]);
+        if (res == -1) {
+            printf("Error: maxTotalServiceCost is not positive for Agency %s\n", Agencies3[i]);
+            bad_exit(conn, "createNewServiceTickets returned an error");
+        }
+        else if (res == -2) {
+            printf("Error: There is no Agency %s in Agencies Table\n", Agencies3[i]);
+            bad_exit(conn, "createNewServiceTickets returned an error");
+        }
+        else
+            printf("Total Service Cost for %s is now %f\n", Agencies3[i], res);
+    }
+    */
+    float res = createNewServiceTickets(conn, "JPBX", 10000.00);
+    printf("result is", res);
+
 
 
     good_exit(conn);
