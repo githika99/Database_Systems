@@ -15,56 +15,52 @@ RETURNS NUMERIC(10,2) AS $$
             V.yearBuilt <= 2020 AND
             NOT EXISTS (SELECT * 
                     FROM VehicleServices VS
-                    WHERE V.vehicleID = VS.vehicleID 
-                    AND V.agencyID = VS.agencyID
-                    AND VS.serviceComplete = "F")
-        ORDER BY V.yearBuilt DESC; 
-    
+                    WHERE VS.vehicleID = V.vehicleID 
+                    AND VS.agencyID = V.agencyID
+                    AND VS.serviceComplete = 'F')
+        ORDER BY V.yearBuilt; 
+
     BEGIN 
 
-    IF maxTotalServiceCost <= 0 THEN
+    IF maxTotalServiceCost <= 0.0 THEN
         RETURN -1;
-    ELSIF (SELECT COUNT(*) FROM Agencies WHERE AgencyID = theAgencyID) == 0 THEN
+    ELSIF (NOT EXISTS(SELECT * FROM Agencies WHERE AgencyID = theAgencyID)) THEN
         RETURN -2;
     END IF;
 
-    
     -- First find current cost of services for Agency
-    SELECT SUM(cost) INTO initialCost
+    SELECT COALESCE(SUM(cost), 0 ) INTO initialCost
     FROM VehicleServices
     WHERE agencyID = theAgencyID
-    AND serviceComplete = "F";
+    AND serviceComplete = 'F';
+    --RETURN initialCost;
 
-    --Loop takes care of this check
-    --IF initialCost >= maxTotalServiceCost THEN
-    --    RETURN initialCost;
-    --END IF;
-
-    -- See which changes you can implement
     OPEN c;
         LOOP
             FETCH c INTO tmpVehicleID, tmpYearBuilt;
             EXIT WHEN NOT FOUND;
 
-            IF tmpYearBuilt <= 1980 THEN
+            IF tmpYearBuilt != -1.0  AND tmpYearBuilt <= 1980 THEN
               tmpCost := 10000.00;
-            ELSIF tmpYearBuilt <= 2000 THEN
+            ELSIF tmpYearBuilt != -1.0  AND tmpYearBuilt <= 2000 THEN
               tmpCost := 5000.00;
-            ELSIF tmpYearBuilt <= 2020 THEN
+            ELSIF tmpYearBuilt != -1.0  AND tmpYearBuilt <= 2020 THEN
               tmpCost := 1500.00;
             END IF;
 
-            EXIT WHEN tmpCost + initialCost >= maxTotalServiceCost;
+            EXIT WHEN ((tmpCost + initialCost) > maxTotalServiceCost);
 
-            -- ADD QUERY
+            --ADD QUERY
             INSERT INTO VehicleServices 
-            VALUES(tmpVehicleID, theAgencyID, "2025-03-14 11:59:00", "F", tmpCost);
+            VALUES(tmpVehicleID, theAgencyID, '2025-03-14 11:59:00', 'F', tmpCost);
 
-            initialCost := initialCost + tmpCost;
+            initialCost := (initialCost + tmpCost);
 
         END LOOP;
     CLOSE c;
+
     RETURN initialCost;
+    
     END
 
 $$ LANGUAGE plpgsql;
