@@ -31,7 +31,8 @@ static void good_exit(PGconn* conn)
  */
 static void bad_exit(PGconn* conn, char *str1)
 {
-    printf("%s: %s\n", str1);
+    printf("%s\n", str1);
+    fprintf(stderr, "%s\n", str1);
     PQfinish(conn);
     exit(EXIT_FAILURE);
 }
@@ -231,17 +232,15 @@ int changeRoute(PGconn *conn, char* theAgencyID, char* oldRouteID, char* newRout
 
 float createNewServiceTickets(PGconn* conn, char* theAgencyID, float maxTotalServiceCost)
 {
-    printf("We are in createNewServiceTickets for %s and %f\n", theAgencyID, maxTotalServiceCost);
+    //printf("We are in createNewServiceTickets for %s and %f\n", theAgencyID, maxTotalServiceCost);
     if (PQresultStatus(PQexec(conn, "BEGIN ISOLATION LEVEL SERIALIZABLE")) != PGRES_COMMAND_OK) {
-        bad_exit(conn, "Begin Transaction Failed");
+         bad_exit(conn, "Begin Transaction Failed");
     }
-    char * tmp;
-    sprintf(tmp, "%d", maxTotalServiceCost); //type cast int to str
+    char tmp[15];
+    sprintf(tmp, "%f", maxTotalServiceCost); //type cast int to str
     const char * paramValues[2];
     paramValues[0] = theAgencyID; //$1
     paramValues[1] = tmp;  //$2
-
-    printf("We are about to call the stored function\n");
 
     PGresult *res = PQexecParams(conn,
         "SELECT createNewServiceTicketsFunction($1, $2);", // Function call
@@ -253,8 +252,6 @@ float createNewServiceTickets(PGconn* conn, char* theAgencyID, float maxTotalSer
         0           
     );
 
-    printf("Return to createNewServiceTickets from stored function\n");
-
     if (PQresultStatus(res) != PGRES_TUPLES_OK) {
         PQexec(conn, "ROLLBACK"); //Rollback transcation
         bad_exit(conn, "Stored Function Call Failed");
@@ -265,14 +262,12 @@ float createNewServiceTickets(PGconn* conn, char* theAgencyID, float maxTotalSer
 
     PQclear(res);
     PQexec(conn, "COMMIT");
-    
-    printf("Returning %d\n", ans);
     return (ans);
 }
 
 int main(int argc, char** argv)
 {
-    printf("We are in main function\n");
+    //printf("We are in main function\n");
 
     PGconn *conn;
 
@@ -297,7 +292,7 @@ int main(int argc, char** argv)
      */
     //Required Tests
 
-    /*
+    
     int stationIDs[4] = {1920, 9870, 6313, 1279};
     for(int i = 0; i < 4; i++){
         //printf("We are calling countStationTransfers with %d\n", stationIDs[i]);
@@ -343,19 +338,21 @@ int main(int argc, char** argv)
         float res = createNewServiceTickets(conn, Agencies3[i], maxTotalServiceCost[i]);
         if (res == -1) {
             printf("Error: maxTotalServiceCost is not positive for Agency %s\n", Agencies3[i]);
-            bad_exit(conn, "createNewServiceTickets returned an error");
+            //bad_exit(conn, "createNewServiceTickets returned an error");
+            // TO DO: Add Bad Exit
         }
         else if (res == -2) {
             printf("Error: There is no Agency %s in Agencies Table\n", Agencies3[i]);
-            bad_exit(conn, "createNewServiceTickets returned an error");
+            //bad_exit(conn, "createNewServiceTickets returned an error");
+            // TO DO: Add Bad Exit
         }
         else
-            printf("Total Service Cost for %s is now %f\n", Agencies3[i], res);
+            printf("Total Service Cost for %s is now %10.2f\n", Agencies3[i], res);
     }
-    */
-    float res = createNewServiceTickets(conn, "JPBX", 10000.00);
-    printf("result is", res);
 
+    // printf("About to call createNewServiceTickets\n");
+    // float res = createNewServiceTickets(conn, "SCMTD", 9000000.00);
+    // printf("result is %f", res);
 
 
     good_exit(conn);
